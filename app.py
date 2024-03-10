@@ -1,12 +1,53 @@
 import streamlit as st
 from huggingface_hub import InferenceClient
-import time
+import re
+import edge_tts
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import tempfile
+from pydub import AudioSegment
 
-client = InferenceClient("mistralai/Mixtral-8x7B-Instruct-v0.1")
+# Initialize Hugging Face InferenceClient
+client_hf = InferenceClient("mistralai/Mixtral-8x7B-Instruct-v0.1")
+
+# Define the async function for text-to-speech conversion using Edge TTS
+async def text_to_speech_edge(text, language_code):
+    voice = {"fr": "fr-FR-RemyMultilingualNeural"}[language_code]
+    communicate = edge_tts.Communicate(text, voice)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+        tmp_path = tmp_file.name
+    await communicate.save(tmp_path)
+    return tmp_path
+
+# Helper function to run async functions from within Streamlit (synchronous context)
+def run_in_threadpool(func, *args, **kwargs):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    future = asyncio.ensure_future(func(*args, **kwargs))
+    return loop.run_until_complete(future)
+
+def concatenate_audio(paths):
+    combined = AudioSegment.empty()
+    for path in paths:
+        audio = AudioSegment.from_mp3(path)
+        combined += audio
+    combined_path = tempfile.mktemp(suffix=".mp3")
+    combined.export(combined_path, format="mp3")
+    return combined_path
+
+# Modified function to work with async Edge TTS
+def dictee_to_audio_segmented(dictee):
+    sentences = segmenter_texte(dictee)
+    audio_urls = []
+    with ThreadPoolExecutor() as executor:
+        for sentence in sentences:
+            processed_sentence = replace_punctuation(sentence)
+            audio_path = executor.submit(run_in_threadpool, text_to_speech_edge, processed_sentence, "fr").result()
+            audio_urls.append(audio_path)
+    return audio_urls
 
 def generer_dictee(classe, longueur):
-    prompt = f"Créer une dictée pour la classe {classe} d'une longueur d'environ {longueur} mots. Il est important de crée le texte uniquement de la dictée et de ne pas ajouter de consignes ou d'indications supplémentaires."
-
+    prompt = f"Créer une dictée pour la classe {classe} d'une longueur d'environ {longueur} mots. Il est important de créer le texte uniquement de la dictée et de ne pas ajouter de consignes ou d'indications supplémentaires."
     generate_kwargs = {
         "temperature": 0.7,
         "max_new_tokens": 1000,
@@ -14,39 +55,117 @@ def generer_dictee(classe, longueur):
         "repetition_penalty": 1.2,
         "do_sample": True,
     }
-
     formatted_prompt = f"<s>[INST] {prompt} [/INST]"
-    stream = client.text_generation(formatted_prompt, **generate_kwargs, stream=True, details=True, return_full_text=False)
+    stream = client_hf.text_generation(formatted_prompt, **generate_kwargs, stream=True, details=True, return_full_text=False)
     dictee = ""
-
     for response in stream:
         dictee += response.token.text
-
-    # Supprimer la balise </s>
-    dictee = dictee.replace("</s>", "")
-
-    # Supprimer "Voici une dictée de..." au début du texte, s'il est présent
-    if dictee.startswith(" Voici une dictée de "):
-        dictee = dictee.split(":", 1)[1].strip()
-
+    dictee = dictee.replace("</s>", "").strip()
     return dictee
 
-st.title('Générateur de Dictée')
+def correction_dictee(dictee, dictee_user):
+    prompt = f"Voici une dictée crée: {dictee} | Voici la dictée faite par l'utilisateur : {dictee_user} - Corrige la dictée en donnant les explications, utilise les syntax du markdown pour une meilleur comprehesion de la correction. Il est important de comparer la dictée de l'utilisateur avec uniquement celle crée."
+    generate_kwargs = {
+        "temperature": 0.7,
+        "max_new_tokens": 2000,  # Ajustez selon la longueur attendue de la correction
+        "top_p": 0.95,
+        "repetition_penalty": 1.2,
+        "do_sample": True,
+    }
+    formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+    stream = client_hf.text_generation(formatted_prompt, **generate_kwargs, stream=True, details=True, return_full_text=False)
+    correction = ""
+    for response in stream:
+        correction += response.token.text
+    correction = correction.replace("</s>", "").strip()
+    return correction
 
-with st.expander("Paramètres de la dictée"):
-    classe = st.selectbox("Classe", ["CP", "CE1", "CE2", "CM1", "CM2", "6ème", "5ème", "4ème", "3ème", "Seconde", "Premiere", "Terminale"], index=2)
-    longueur = st.slider("Longueur de la dictée (nombre de mots)", 50, 500, 200)
-    st.caption("*Merci de ne pas mettre la longueur a 50 ou 500 pour des raisons de bug.*")
+def replace_punctuation(text):
+    replacements = {
+        ".": " point.",
+        ",": " virgule,",
+        ";": " point-virgule;",
+        ":": " deux-points:",
+        "!": " point d'exclamation!",
+        "?": " point d'interrogation?",
+    }
+    for key, value in replacements.items():
+        text = text.replace(key, value)
+    return text
 
-if st.button('Générer la Dictée'):
-    # Afficher une barre de chargement pendant la génération
-    with st.spinner("Génération de la dictée en cours..."):
-        # Simuler un délai de chargement (facultatif)
-        time.sleep(1)
+def segmenter_texte(texte):
+    sentences = re.split(r'(?<=[.!?]) +', texte)
+    return sentences
 
-        dictee = generer_dictee(classe, longueur)
+# Streamlit App Interface
+st.set_page_config(layout="wide")
+st.title('🎓 Entrainement de Dictée')
 
-    # Afficher la dictée générée
-    st.text_area("Voici votre dictée :", dictee, height=300)
+if 'expanded' not in st.session_state:
+    st.session_state.expanded = True
+with st.expander("📝 Génération de la dictée", expanded=st.session_state.expanded):
+    with st.form("dictation_form"):
+        st.markdown("### 🚀 Choisissez votre mode de dictée")
+        mode = st.radio("Mode:", ["S'entrainer: Vous aurez uniquement les audios suivi d'une correction par IA (Pour 1 seul personne)", "Entrainer: Vous aurez uniquement le texte de la dictée pour entrainer quelqu'un d'autre (Pour 2 ou + personnes)"])
+        st.markdown("### 🎒 Sélectionnez la classe")
+        classe = st.selectbox("Classe", ["CP", "CE1", "CE2", "CM1", "CM2", "6ème", "5ème", "4ème", "3ème", "Seconde", "Premiere", "Terminale"], index=2)
+        st.markdown("### 📏 Définissez la longueur de la dictée")
+        longueur = st.slider("Longueur de la dictée (nombre de mots)", 50, 500, 200)
+        submitted = st.form_submit_button("🔮 Générer la Dictée")
 
+if submitted or 'dictee' in st.session_state:
+    if 'dictee' not in st.session_state:
+        st.session_state.dictee = generer_dictee(classe, longueur)
+    if 'expandedmodified' not in st.session_state:
+        st.session_state.expandedmodified = False
+    dictee = st.session_state.dictee
+    st.session_state.expanded = False
+    st.divider()
+    with st.spinner("🚀 Dictée en cours de création..."):
+        if not st.session_state.expandedmodified:
+            st.session_state.expandedmodified = True
+            st.rerun()
+    del st.session_state['expandedmodified']
+    
+    if mode.startswith("S'entrainer"):
+        if 'audio_urls' not in st.session_state:
+            with st.spinner("🔊 Préparation des audios..."):
+                st.session_state.audio_urls = dictee_to_audio_segmented(dictee)
+        audio_urls = st.session_state.audio_urls
+        if 'concatenated_audio_path' not in st.session_state:
+            with st.spinner("🎵 Assemblage de l'audio complet..."):
+                st.session_state.concatenated_audio_path = concatenate_audio(audio_urls)
+        concatenated_audio_path = st.session_state.concatenated_audio_path
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("## 📖 Dictée en entier")
+            st.audio(concatenated_audio_path, format='audio/wav', start_time=0)
+            st.divider()
+            st.markdown("## 📖 Phrases de la Dictée")
+            with st.expander("Cliquez ici pour ouvrir"):
+                cols_per_row = 3
+                rows = (len(audio_urls) + cols_per_row - 1) // cols_per_row  # Arrondir au nombre supérieur
+                for i in range(rows):
+                    cols = st.columns(cols_per_row)
+                    for j in range(cols_per_row):
+                        idx = i * cols_per_row + j
+                        if idx < len(audio_urls):
+                            with cols[j]:
+                                st.markdown(f"**Phrase {idx + 1}:**")
+                                st.audio(audio_urls[idx], format='audio/wav')
+        
+        with col2:
+            st.markdown("## ✍️ Votre Dictée")
+            dictee_user = st.text_area("Écrivez la dictée ici:", key="dictee_user")
+            if st.button("📝 Correction", key="submit_correction"):
+                    st.session_state.correction = correction_dictee(dictee, dictee_user)
+        
+        if 'correction' in st.session_state:
+            st.divider()
+            st.markdown("### 🎉 Voici la correction (*Par IA*) :")
+            st.markdown(st.session_state.correction)
 
+    elif mode.startswith("Entrainer"):
+        st.markdown("### 📚 Voici la dictée :")
+        st.markdown(dictee)
