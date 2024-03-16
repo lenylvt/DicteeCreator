@@ -65,6 +65,7 @@ def generer_dictee(classe, longueur):
 
 def correction_dictee(dictee, dictee_user):
     prompt = f"""
+Utilise les syntax du markdown pour un meilleur rendu.
 Introduction:
 Vous avez deux textes importants à analyser et à comparer. Le premier, nommé dictee, est la version correcte et officielle d'une dictée. Le second, dictee_user, est une tentative de reproduction de cette dictée par un utilisateur, qui peut contenir des erreurs.
 Objectif:
@@ -119,7 +120,6 @@ def segmenter_texte(texte):
     return sentences
 
 # Streamlit App Interface
-st.set_page_config(layout="wide")
 st.title('🎓 Entrainement de Dictée')
 
 # Initializing session state variables
@@ -181,21 +181,20 @@ if submitted or st.session_state.dictee != None:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("## 📖 Dictée en entier")
-            st.audio(concatenated_audio_path, format='audio/wav', start_time=0)
+            st.sidebar.markdown("## 📖 Dictée en entier")
+            st.sidebar.audio(concatenated_audio_path, format='audio/wav', start_time=0)
             st.divider()
-            st.markdown("## 📖 Phrases de la Dictée")
-            with st.expander("Cliquez ici pour ouvrir"):
-                cols_per_row = 2
-                rows = (len(audio_urls) + cols_per_row - 1) // cols_per_row  # Arrondir au nombre supérieur
-                for i in range(rows):
-                    cols = st.columns(cols_per_row)
-                    for j in range(cols_per_row):
-                        idx = i * cols_per_row + j
-                        if idx < len(audio_urls):
-                            with cols[j]:
-                                st.markdown(f"**Phrase {idx + 1}:**")
-                                st.audio(audio_urls[idx], format='audio/wav')
+            st.sidebar.markdown("## 📖 Phrases de la Dictée")
+            cols_per_row = 2
+            rows = (len(audio_urls) + cols_per_row - 1) // cols_per_row  # Arrondir au nombre supérieur
+            for i in range(rows):
+                cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
+                    idx = i * cols_per_row + j
+                    if idx < len(audio_urls):
+                        with cols[j]:
+                            st.sidebar.markdown(f"**Phrase {idx + 1}:**")
+                            st.sidebar.audio(audio_urls[idx], format='audio/wav')
         
         with col2:
             st.markdown("## ✍️ Votre Dictée")
