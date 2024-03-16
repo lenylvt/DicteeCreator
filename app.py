@@ -64,7 +64,28 @@ def generer_dictee(classe, longueur):
     return dictee
 
 def correction_dictee(dictee, dictee_user):
-    prompt = f"Voici une dictée crée: {dictee} | Voici la dictée faite par l'utilisateur : {dictee_user} - Corrige la dictée en donnant les explications, utilise les syntax du markdown pour une meilleur comprehesion de la correction. Il est important de comparer la dictée de l'utilisateur avec uniquement celle crée."
+    prompt = f"""
+Introduction:
+Vous avez deux textes importants à analyser et à comparer. Le premier, nommé dictee, est la version correcte et officielle d'une dictée. Le second, dictee_user, est une tentative de reproduction de cette dictée par un utilisateur, qui peut contenir des erreurs.
+Objectif:
+Votre tâche consiste à identifier les erreurs dans dictee_user en le comparant à dictee, et à fournir une version corrigée de dictee_user qui corrige ces erreurs tout en expliquant les corrections effectuées.
+Instructions détaillées:
+Comparaison: Examinez attentivement dictee_user et comparez-le à dictee pour détecter toutes les différences. Notez que dictee est la version exacte et sans erreur, tandis que dictee_user peut contenir des fautes d'orthographe, de grammaire, ou de syntaxe.
+Identification des Erreurs: Identifiez spécifiquement les erreurs dans dictee_user. Cela peut inclure des mots mal orthographiés, des erreurs grammaticales, des problèmes de ponctuation, ou des maladresses de style.
+Correction et Explication: Pour chaque erreur identifiée, corrigez-la et fournissez une courte explication ou la règle grammaticale pertinente. Cela aidera l'utilisateur à comprendre ses fautes et à apprendre de ses erreurs.
+Rendu Final: Présentez une version corrigée de dictee_user qui intègre toutes vos corrections. Assurez-vous que cette version est désormais conforme à dictee tant sur le plan du contenu que de la forme.
+Exemple:
+Dictée (dictee): "Les forêts anciennes abritent une biodiversité riche et variée."
+Dictée de l'Utilisateur (dictee_user): "Les forets anciennes abritent une biodiversitée riche et variés."
+Corrections:
+"forets" devrait être "forêts" (ajout d'un accent circonflexe sur le "e" pour respecter la règle d'orthographe).
+"biodiversitée" est incorrect, la forme correcte est "biodiversité" (pas de "e" à la fin, erreur courante de suffixe).
+"variés" devrait être "variée" pour s'accorder en genre et en nombre avec "biodiversité".
+Voici la dictée :
+{dictee}
+Voici la dictée de l'utilisateur :
+{dictee_user}
+    """
     generate_kwargs = {
         "temperature": 0.7,
         "max_new_tokens": 2000,  # Ajustez selon la longueur attendue de la correction
@@ -195,6 +216,7 @@ if submitted or st.session_state.dictee != None:
                 del st.session_state['dictee']
                 del st.session_state['audio_urls']
                 del st.session_state['concatenated_audio_path']
+                del st.session_state['correction']
                 st.session_state.dicteecreation = False
                 st.session_state.creationmodified = False
                 st.rerun()
