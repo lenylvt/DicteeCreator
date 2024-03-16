@@ -101,8 +101,29 @@ def segmenter_texte(texte):
 st.set_page_config(layout="wide")
 st.title('🎓 Entrainement de Dictée')
 
+# Initializing session state variables
 if 'expanded' not in st.session_state:
     st.session_state.expanded = True
+
+if 'dicteecreation' not in st.session_state:
+    st.session_state.dicteecreation = False
+
+if 'creationmodified' not in st.session_state:
+    st.session_state.creationmodified = False
+
+if 'dictee' not in st.session_state:
+    st.session_state.dictee = None
+
+if 'audio_urls' not in st.session_state:
+    st.session_state.audio_urls = []
+
+if 'concatenated_audio_path' not in st.session_state:
+    st.session_state.concatenated_audio_path = None
+
+if 'correction' not in st.session_state:
+    st.session_state.correction = None
+
+# Settings Dictee
 with st.expander("📝 Génération de la dictée", expanded=st.session_state.expanded):
     with st.form("dictation_form"):
         st.markdown("### 🚀 Choisissez votre mode de dictée")
@@ -111,28 +132,28 @@ with st.expander("📝 Génération de la dictée", expanded=st.session_state.ex
         classe = st.selectbox("Classe", ["CP", "CE1", "CE2", "CM1", "CM2", "6ème", "5ème", "4ème", "3ème", "Seconde", "Premiere", "Terminale"], index=2)
         st.markdown("### 📏 Définissez la longueur de la dictée")
         longueur = st.slider("Longueur de la dictée (nombre de mots)", 50, 500, 200)
-        submitted = st.form_submit_button("🔮 Générer la Dictée")
+        submitted = st.form_submit_button("🔮 Générer la Dictée", disabled=st.session_state.dicteecreation)
 
-if submitted or 'dictee' in st.session_state:
-    if 'dictee' not in st.session_state:
-        st.session_state.dictee = generer_dictee(classe, longueur)
-    if 'expandedmodified' not in st.session_state:
-        st.session_state.expandedmodified = False
-    dictee = st.session_state.dictee
-    st.session_state.expanded = False
-    st.divider()
+if submitted or st.session_state.dictee != None:
     with st.spinner("🚀 Dictée en cours de création..."):
-        if not st.session_state.expandedmodified:
+        if st.session_state.creationmodified == False:
             st.session_state.expandedmodified = True
+            st.session_state.dicteecreation = True
+
+            if 'dictee' != None:
+                st.session_state.dictee = generer_dictee(classe, longueur)
+            
+            st.session_state.creationmodified = True
             st.rerun()
-    del st.session_state['expandedmodified']
-    
+
+    dictee = st.session_state.dictee
+                
     if mode.startswith("S'entrainer"):
-        if 'audio_urls' not in st.session_state:
+        if 'audio_urls' != None:
             with st.spinner("🔊 Préparation des audios..."):
                 st.session_state.audio_urls = dictee_to_audio_segmented(dictee)
         audio_urls = st.session_state.audio_urls
-        if 'concatenated_audio_path' not in st.session_state:
+        if 'concatenated_audio_path' != None:
             with st.spinner("🎵 Assemblage de l'audio complet..."):
                 st.session_state.concatenated_audio_path = concatenate_audio(audio_urls)
         concatenated_audio_path = st.session_state.concatenated_audio_path
@@ -144,7 +165,7 @@ if submitted or 'dictee' in st.session_state:
             st.divider()
             st.markdown("## 📖 Phrases de la Dictée")
             with st.expander("Cliquez ici pour ouvrir"):
-                cols_per_row = 3
+                cols_per_row = 2
                 rows = (len(audio_urls) + cols_per_row - 1) // cols_per_row  # Arrondir au nombre supérieur
                 for i in range(rows):
                     cols = st.columns(cols_per_row)
@@ -157,15 +178,33 @@ if submitted or 'dictee' in st.session_state:
         
         with col2:
             st.markdown("## ✍️ Votre Dictée")
-            dictee_user = st.text_area("Écrivez la dictée ici:", key="dictee_user")
-            if st.button("📝 Correction", key="submit_correction"):
-                    st.session_state.correction = correction_dictee(dictee, dictee_user)
+            with st.form("dictee_form"):
+                dictee_user = st.text_area("Écrivez la dictée ici:", key="dictee_user", height=350)
+                correct = st.form_submit_button("📝 Correction")
         
-        if 'correction' in st.session_state:
+                if correct:
+                    st.session_state.correction = correction_dictee(dictee, dictee_user)
+                    st.rerun()
+
+        if st.session_state.correction != None:
             st.divider()
             st.markdown("### 🎉 Voici la correction (*Par IA*) :")
             st.markdown(st.session_state.correction)
+            if st.button("En faire une nouvelle"):
+                del st.session_state['expandedmodified']
+                del st.session_state['dictee']
+                del st.session_state['audio_urls']
+                del st.session_state['concatenated_audio_path']
+                st.session_state.dicteecreation = False
+                st.session_state.creationmodified = False
+                st.rerun()
 
     elif mode.startswith("Entrainer"):
         st.markdown("### 📚 Voici la dictée :")
         st.markdown(dictee)
+        if st.button("En faire une nouvelle"):
+            del st.session_state['expandedmodified']
+            del st.session_state['dictee']
+            st.session_state.dicteecreation = False
+            st.session_state.creationmodified = False
+            st.rerun()
